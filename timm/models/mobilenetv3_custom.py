@@ -1122,26 +1122,45 @@ default_cfgs = generate_default_cfgs({
         # hf_hub_id='timm/',
         crop_pct=0.95, interpolation='bicubic'),
     'mobilenetv4_conv_blur_medium_myblur': _cfg(
-    hf_hub_id='',            # no pretrained
-    input_size=(3,224,224),
-    crop_pct=0.95,
-    interpolation='bicubic',
+        hf_hub_id='',
+        input_size=(3,224,224), crop_pct=0.95,
+        interpolation='bicubic',
     ),
+
 })
 
-
-# ─── 2) Thin wrapper to inject MS-DDW ─────────────────────────────────────
-class MobileNetV4_WITH_MSDDW(nn.Module):
-    def __init__(self, base_model: nn.Module, dilations=(1,2,4), dropout=0.3):
+# ─── 1) MSDDWBlock definition ───────────────────────────────────────────────
+class MSDDWBlock(nn.Module):
+    def __init__(self, channels, dilations=(1,2,4)):
         super().__init__()
-        self.base  = base_model
-        c = self.base.feature_info.channels()[-1]
-        self.msddw = MobileNetV4_WITH_MSDDW(c, dilations)
+        # depthwise convolutions at multiple dilations
+        self.branches = nn.ModuleList([
+            nn.Conv2d(channels, channels, kernel_size=3,
+                      padding=d, dilation=d, groups=channels, bias=False)
+            for d in dilations
+        ])
+        # project concatenated features back to channels
+        self.project = nn.Conv2d(channels * len(dilations), channels, kernel_size=1, bias=False)
+        self.bn      = nn.BatchNorm2d(channels)
+        self.act     = nn.ReLU(inplace=True)
+
     def forward(self, x):
-        # pull out the final feature map
+        # x: [B, C, H, W]
+        outs   = [b(x) for b in self.branches]      # list of [B, C, H, W]
+        x_cat  = torch.cat(outs, dim=1)             # [B, C*len, H, W]
+        x_proj = self.project(x_cat)                # [B, C, H, W]
+        return self.act(self.bn(x_proj) + x_proj)
+    
+class MobileNetV4_WITH_MSDDW(nn.Module):
+    def __init__(self, base_model, dilations=(1,2,4), dropout=0.3):
+        super().__init__()
+        self.base     = base_model
+        c = self.base.feature_info.channels()[-1]
+        self.msddw    = MSDDWBlock(c, dilations)
+    def forward(self, x):
         feats = self.base.forward_features(x)
-        x     = self.msddw(feats[-1])         # apply MS-DDW
-        return self.base.forward_head(x)      # then run the original head
+        x     = self.msddw(feats[-1])
+        return self.base.forward_head(x)
 
 @register_model
 def mobilenetv3_large_075(pretrained: bool = False, **kwargs) -> MobileNetV3:
@@ -1385,8 +1404,7 @@ def mobilenetv4_hybrid_large_075(pretrained: bool = False, **kwargs) -> MobileNe
     return model
 
 @register_model
-def mobilenetv4_conv_blur_medium_myblur(pretrained: bool=False, **kwargs):
-    """MobileNetV4 conv_blur_medium + MS-DDW block"""
+def mobilenetv4_conv_blur_medium_myblur(pretrained=False, **kwargs):
     base = _gen_mobilenet_v4(
         'mobilenetv4_conv_blur_medium.e500_r224_in1k',
         1.0, pretrained=pretrained, aa_layer='blurpc', **kwargs

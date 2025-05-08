@@ -80,6 +80,9 @@ from .vovnet import *
 from .xception import *
 from .xception_aligned import *
 from .xcit import *
+# after the other imports
+from .mobilenetv3_custom import *
+
 
 from ._builder import (
     build_model_with_cfg as build_model_with_cfg,
