@@ -1131,18 +1131,16 @@ default_cfgs = generate_default_cfgs({
 
 # ─── 1) MSDDWBlock definition ───────────────────────────────────────────────
 class MSDDWBlock(nn.Module):
-    def __init__(self, channels, dilations=(1,2,4)):
+    def __init__(self, base_model, dilations=(1,2,4), dropout=0.3):
         super().__init__()
-        # depthwise convolutions at multiple dilations
-        self.branches = nn.ModuleList([
-            nn.Conv2d(channels, channels, kernel_size=3,
-                      padding=d, dilation=d, groups=channels, bias=False)
-            for d in dilations
-        ])
-        # project concatenated features back to channels
-        self.project = nn.Conv2d(channels * len(dilations), channels, kernel_size=1, bias=False)
-        self.bn      = nn.BatchNorm2d(channels)
-        self.act     = nn.ReLU(inplace=True)
+        self.base  = base_model
+        # get last stage channel count
+        c = self.base.feature_info[-1].num_chs
+        self.msddw = MSDDWBlock(c, dilations)
+    def forward(self, x):
+        feats = self.base.forward_features(x)
+        x     = self.msddw(feats[-1])
+        return self.base.forward_head(x)
 
     def forward(self, x):
         # x: [B, C, H, W]
@@ -1154,9 +1152,10 @@ class MSDDWBlock(nn.Module):
 class MobileNetV4_WITH_MSDDW(nn.Module):
     def __init__(self, base_model, dilations=(1,2,4), dropout=0.3):
         super().__init__()
-        self.base     = base_model
-        c = self.base.feature_info.channels()[-1]
-        self.msddw    = MSDDWBlock(c, dilations)
+        self.base  = base_model
+        # get last stage channel count
+        c = self.base.feature_info[-1].num_chs
+        self.msddw = MSDDWBlock(c, dilations)
     def forward(self, x):
         feats = self.base.forward_features(x)
         x     = self.msddw(feats[-1])
