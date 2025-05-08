@@ -1150,19 +1150,11 @@ class MSDDWBlock(nn.Module):
         x_proj = self.project(x_cat)
         return self.act(self.bn(x_proj) + x_proj)
 
-
-    def forward(self, x):
-        # x: [B, C, H, W]
-        outs   = [b(x) for b in self.branches]      # list of [B, C, H, W]
-        x_cat  = torch.cat(outs, dim=1)             # [B, C*len, H, W]
-        x_proj = self.project(x_cat)                # [B, C, H, W]
-        return self.act(self.bn(x_proj) + x_proj)
     
 class MobileNetV4_WITH_MSDDW(nn.Module):
     def __init__(self, base_model, dilations=(1,2,4), dropout=0.3):
         super().__init__()
         self.base  = base_model
-        # feature_info is a list of dicts; last dict has 'num_chs'
         c = self.base.feature_info[-1]['num_chs']
         self.msddw = MSDDWBlock(c, dilations)
 
@@ -1170,6 +1162,7 @@ class MobileNetV4_WITH_MSDDW(nn.Module):
         feats = self.base.forward_features(x)
         x     = self.msddw(feats[-1])
         return self.base.forward_head(x)
+
 
 
 @register_model
