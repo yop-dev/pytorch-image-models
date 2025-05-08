@@ -1129,18 +1129,27 @@ default_cfgs = generate_default_cfgs({
 
 })
 
-# ─── 1) MSDDWBlock definition ───────────────────────────────────────────────
+import torch
+import torch.nn as nn
+
 class MSDDWBlock(nn.Module):
-    def __init__(self, base_model, dilations=(1,2,4), dropout=0.3):
+    def __init__(self, channels, dilations=(1,2,4)):
         super().__init__()
-        self.base  = base_model
-        # get last stage channel count
-        c = self.base.feature_info[-1].num_chs
-        self.msddw = MSDDWBlock(c, dilations)
+        self.branches = nn.ModuleList([
+            nn.Conv2d(channels, channels, kernel_size=3,
+                      padding=d, dilation=d, groups=channels, bias=False)
+            for d in dilations
+        ])
+        self.project = nn.Conv2d(channels * len(dilations), channels, kernel_size=1, bias=False)
+        self.bn      = nn.BatchNorm2d(channels)
+        self.act     = nn.ReLU(inplace=True)
+
     def forward(self, x):
-        feats = self.base.forward_features(x)
-        x     = self.msddw(feats[-1])
-        return self.base.forward_head(x)
+        outs   = [b(x) for b in self.branches]
+        x_cat  = torch.cat(outs, dim=1)
+        x_proj = self.project(x_cat)
+        return self.act(self.bn(x_proj) + x_proj)
+
 
     def forward(self, x):
         # x: [B, C, H, W]
@@ -1152,14 +1161,16 @@ class MSDDWBlock(nn.Module):
 class MobileNetV4_WITH_MSDDW(nn.Module):
     def __init__(self, base_model, dilations=(1,2,4), dropout=0.3):
         super().__init__()
-        self.base = base_model
-        # get last stage channel count from the feature_info list of dicts
+        self.base  = base_model
+        # feature_info is a list of dicts; last dict has 'num_chs'
         c = self.base.feature_info[-1]['num_chs']
         self.msddw = MSDDWBlock(c, dilations)
+
     def forward(self, x):
         feats = self.base.forward_features(x)
         x     = self.msddw(feats[-1])
         return self.base.forward_head(x)
+
 
 @register_model
 def mobilenetv3_large_075(pretrained: bool = False, **kwargs) -> MobileNetV3:
