@@ -1152,9 +1152,9 @@ class MSDDWBlock(nn.Module):
 class MobileNetV4_WITH_MSDDW(nn.Module):
     def __init__(self, base_model, dilations=(1,2,4), dropout=0.3):
         super().__init__()
-        self.base  = base_model
-        # get last stage channel count
-        c = self.base.feature_info[-1].num_chs
+        self.base = base_model
+        # get last stage channel count from the feature_info list of dicts
+        c = self.base.feature_info[-1]['num_chs']
         self.msddw = MSDDWBlock(c, dilations)
     def forward(self, x):
         feats = self.base.forward_features(x)
